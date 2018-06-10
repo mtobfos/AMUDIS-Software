@@ -94,19 +94,20 @@ class AMUDIS_control(QtWidgets.QMainWindow):
         if self.ui.showPicture.isChecked() is True:
             self.Camera.take_picture(show=True, average=average)
         else:
-            self.Camera.take_picture(show=True, average=average)
+            self.Camera.take_picture(show=False, average=average)
 
     def start(self):
-
         self.config = self.configuration()
         self.timed = TimedMeasurement(config=self.config)
         self.timed.moveToThread(self.thread)
         self.timed.started.connect(self.timed.run)
+        self.timed.isRunning = True
+        print('Starting measurements...')
         self.timed.start()
 
     def stop(self):
-        self.timed.terminate()
-        print("Stopping measurements")
+        self.timed.isRunning = False
+        print("Stopping measurements...")
 
 
 class TimedMeasurement(QtCore.QThread):
@@ -116,6 +117,11 @@ class TimedMeasurement(QtCore.QThread):
 
         self.config = config
         self.Camera = Camera()
+        self.isRunning = False
+
+    def __del__(self):
+        self.quit()
+        self.wait()
 
     def run(self):
         """Run the schedule measurements """
@@ -126,33 +132,37 @@ class TimedMeasurement(QtCore.QThread):
         cnt_wait = 0
 
         while self.config['end_time'] >= meas_time:
-            time_now = datetime.datetime.now()
 
-            if time_now >= self.config['end_time']:
-                print("Write a valid initial time")
-                break
+            if self.isRunning is True:
+                time_now = datetime.datetime.now()
 
-            elif time_now < self.config['initial_time']:
-                tm.sleep(0.1)
+                if time_now >= self.config['end_time']:
+                    print("Write a valid initial time")
+                    break
 
-                if (cnt_wait % 20) == 0:
-                    print('waiting initial time {},{}'.format(self.config['initial_time'],
-                                                              time_now))
+                elif time_now < self.config['initial_time']:
+                    tm.sleep(0.1)
+
+                    if (cnt_wait % 20) == 0:
+                        print('waiting initial time {},{}'.format(self.config['initial_time'],
+                                                                  time_now))
+                    else:
+                        pass
+                    cnt_wait += 1
+
                 else:
-                    pass
-                cnt_wait += 1
-
+                    if meas_time - datetime.timedelta(seconds=step) <= time_now:
+                        self.Camera.take_picture(show=False, average=self.config['average'])
+                        print("measuring, ", meas_time)  # %run nir.py
+                        meas_time += datetime.timedelta(seconds=step)
+                        self.config['lcd'].display(cnt)
+                        cnt += 1
+                    else:
+                        pass
             else:
-                if meas_time - datetime.timedelta(seconds=step) <= time_now:
-                    self.Camera.take_picture(show=False, average=self.config['average'])
-                    print("measuring, ", meas_time)  # %run nir.py
-                    meas_time += datetime.timedelta(seconds=step)
-                    self.lcd.display(cnt)
-                    cnt += 1
-                else:
-                    pass
-
-        print('Measurement completed')
+                self.isRunning = False
+                print('Measurements stopped by user')
+                break
 
 
 
@@ -160,7 +170,7 @@ class Camera:
 
     def __init__(self):
         pass
-        
+
     def read_sensor(self, average):
         foto = cam.readNFrames(average, timeout=20000)
         return foto[0][0]
