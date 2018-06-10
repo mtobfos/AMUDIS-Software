@@ -2,14 +2,24 @@
 import matplotlib.pyplot as plt
 import netCDF4 as nc
 from PyQt5 import QtCore, QtGui, QtWidgets
-import sys
 import time as tm
+import numpy as np
 import os
+
+import sys
+
+# path to camera modules
+cwd = os.getcwd()
+
+CAMERA_PATH = cwd
+
+if not CAMERA_PATH in sys.path:
+    sys.path.append(CAMERA_PATH)
+
 from picam import *
 from GUI import AMUDIS_GUI as GUI
 
 cam = picam()
-cwd = os.getcwd()
 
 
 class AMUDIS_control(QtWidgets.QMainWindow):
@@ -20,14 +30,20 @@ class AMUDIS_control(QtWidgets.QMainWindow):
 
         self.ui = GUI.Ui_MainWindow()
         self.ui.setupUi(self)
+
         self.Camera = Camera()
 
         self.ui.actionQuit.triggered.connect(self.close_program)
         self.ui.actionInitialize_system.triggered.connect(self.initialize)
         self.ui.loadCamera.clicked.connect(self.loadCamera)
-        self.ui.takePictureButton.clicked.connect(self.Camera.take_picture)
+        self.ui.takePictureButton.clicked.connect(self.take_picture)
         self.ui.pushButtonLoadSettings.clicked.connect(self.load_setting)
-        self.ui.startButton.clicked.connect(self.timed_measurement)
+        self.ui.startButton.clicked.connect(self.start)
+        self.ui.stopButton.clicked.connect(self.stop)
+
+        self.config = self.configuration()
+        self.timed = TimedMeasurement(config=self.config)
+        self.thread = QtCore.QThread()
 
 
     # Methods of class
@@ -58,64 +74,104 @@ class AMUDIS_control(QtWidgets.QMainWindow):
         # exposure
         exposure = int(self.ui.ExposureValue.text())
         cam.setParameter("ExposureTime", exposure)
-        cam.setParameter("ReadoutControlMode", PicamReadoutControlMode["FullFrame"])
+        # cam.setParameter("ReadoutControlMode", PicamReadoutControlMode["FullFrame"])
         # send configuration
         cam.sendConfiguration()
         print("Sensor temperature: {}\nExposure time: {}\nParameters loaded".
               format(sensorTemperature, exposure))
 
-
-    def timed_measurement(self):
+    def configuration(self):
 
         initial_time = self.ui.dateTimeEdit_begin.dateTime().toPyDateTime()
         end_time = self.ui.dateTimeEdit_end.dateTime().toPyDateTime()
         lcd = self.ui.lcdNumber
+        interval = int(self.ui.IntervalValue.text())
+        average = int(self.ui.AverageValue.text())
 
-        self.timed = TimedMeasurement(initial_time, end_time, lcd)
-        self.thread = QtCore.QThread()
+        config = {'initial_time': initial_time,
+                  'end_time': end_time,
+                  'lcd': lcd,
+                  'interval': interval,
+                  'average': average}
+
+        return config
+
+    def take_picture(self):
+        """ """
+        average = int(self.ui.AverageValue.text())
+
+        if self.ui.showPicture.isChecked() is True:
+            self.Camera.take_picture(show=True, average=average)
+        else:
+            self.Camera.take_picture(show=False, average=average)
+
+    def start(self):
+        self.config = self.configuration()
+        self.timed = TimedMeasurement(config=self.config)
         self.timed.moveToThread(self.thread)
         self.timed.started.connect(self.timed.run)
+        self.timed.isRunning = True
+        print('Starting measurements...')
         self.timed.start()
+
+    def stop(self):
+        self.timed.isRunning = False
+        print("Stopping measurements...\n")
 
 
 class TimedMeasurement(QtCore.QThread):
 
-    def __init__(self, initial_time, end_time, lcd):
-        super(TimedMeasurement, self).__init__()
+    def __init__(self, config):
+        super(TimedMeasurement,  self).__init__()
 
-        self.initial_time = initial_time
-        self.end_time = end_time
-        self.lcd = lcd
+        self.config = config
+        self.Camera = Camera()
+        self.isRunning = False
 
+    def __del__(self):
+        self.quit()
+        self.wait()
 
     def run(self):
-        """ """
-        self.Camera = Camera()
-
-        print(self.initial_time)
-        meas_time = self.initial_time
-        step = 4 # seconds
+        """Run the schedule measurements """
+        print(self.config['initial_time'])
+        meas_time = self.config['initial_time']
+        step = self.config['interval']  # seconds
         cnt = 0
+        cnt_wait = 0
 
-        while self.end_time >= meas_time:
-            time_now = datetime.datetime.now()
-            if time_now >= self.end_time:
-                print("Write a valid initial time")
-                break
-            elif time_now < self.initial_time:
-                tm.sleep(1)
-                print('waiting initial time {},{}'.format(self.initial_time, time_now))
-            else:
-                if meas_time - datetime.timedelta(seconds=step) <= time_now:
-                    self.Camera.take_picture(False)
-                    print("measuring, ", meas_time)      # %run nir.py
-                    meas_time += datetime.timedelta(seconds=step)
-                    self.lcd.display(cnt)
-                    cnt += 1
+        while self.config['end_time'] >= meas_time:
+
+            if self.isRunning is True:
+                time_now = datetime.datetime.now()
+
+                if time_now >= self.config['end_time']:
+                    print("Write a valid initial time")
+                    break
+
+                elif time_now < self.config['initial_time']:
+                    tm.sleep(0.1)
+
+                    if (cnt_wait % 20) == 0:
+                        print('waiting initial time {},{}'.format(self.config['initial_time'],
+                                                                  time_now))
+                    else:
+                        pass
+                    cnt_wait += 1
+
                 else:
-                    pass
-
-        print('Measurement completed')
+                    if meas_time - datetime.timedelta(seconds=step) <= time_now:
+                        self.Camera.take_picture(show=False, average=self.config['average'])
+                        print("measuring, ", meas_time)  # %run nir.py
+                        meas_time += datetime.timedelta(seconds=step)
+                        self.config['lcd'].display(cnt)
+                        cnt += 1
+                    else:
+                        pass
+            else:
+                self.isRunning = False
+                print('Measurements stopped by User\n')
+                break
 
 
 class Camera:
@@ -123,13 +179,12 @@ class Camera:
     def __init__(self):
         pass
 
-    @staticmethod
-    def read_sensor():
-        foto = cam.readNFrames(1, timeout=20000)
+    def read_sensor(self, average):
+        foto = cam.readNFrames(average, timeout=20000)
         return foto[0][0]
 
-    def take_picture(self, show=True):
-        image = self.read_sensor()
+    def take_picture(self, show, average):
+        image = self.read_sensor(average)
 
         if show is True:
             plt.imshow(image, cmap='gray')

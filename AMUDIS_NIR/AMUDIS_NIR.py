@@ -116,7 +116,7 @@ class AMUDIS_control(QtWidgets.QMainWindow):
 
     def stop(self):
         self.timed.isRunning = False
-        print("Stopping measurements...")
+        print("Stopping measurements...\n")
 
 
 class TimedMeasurement(QtCore.QThread):
@@ -170,7 +170,7 @@ class TimedMeasurement(QtCore.QThread):
                         pass
             else:
                 self.isRunning = False
-                print('Measurements stopped by user')
+                print('Measurements stopped by User\n')
                 break
 
 
@@ -181,6 +181,8 @@ class Camera:
 
     def read_sensor(self, average):
         foto = cam.readNFrames(average, timeout=20000)
+
+        #np.average(foto[:][0])
         return foto[0][0]
 
     def take_picture(self, show, average):

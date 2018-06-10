@@ -2,15 +2,24 @@
 import matplotlib.pyplot as plt
 import netCDF4 as nc
 from PyQt5 import QtCore, QtGui, QtWidgets
-import sys
 import time as tm
 import numpy as np
 import os
+
+import sys
+
+# path to camera modules
+cwd = os.getcwd()
+
+CAMERA_PATH = cwd
+
+if not CAMERA_PATH in sys.path:
+    sys.path.append(CAMERA_PATH)
+
 from picam import *
 from GUI import AMUDIS_GUI as GUI
 
 cam = picam()
-cwd = os.getcwd()
 
 
 class AMUDIS_control(QtWidgets.QMainWindow):
@@ -163,7 +172,6 @@ class TimedMeasurement(QtCore.QThread):
                 self.isRunning = False
                 print('Measurements stopped by user')
                 break
-
 
 
 class Camera:
